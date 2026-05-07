@@ -112,11 +112,14 @@ def resolve_criteria_type(col):
     if col in ["CROP_PRICE"]:
         return "Cost"
     elif col in ["N_SOIL", "P_SOIL", "K_SOIL", "TEMPERATURE", "HUMIDITY", "ph", "RAINFALL"]:
-        return "Preference"
+        return "Benefit"
+    # elif col in ["N_SOIL", "P_SOIL", "K_SOIL", "TEMPERATURE", "HUMIDITY", "ph", "RAINFALL"]:
+    #     return "Preference"
     elif col in ["STATE", "CROP"]:
         return "Categorical"
 
 def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
+    st.divider()
     st.subheader("⚙️ Konfigurasi Kriteria dan Bobot")
 
     criteria: List[Criterion] = [{
@@ -169,7 +172,7 @@ def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
                 pairwise_comparisons[key] = selected_value
     
     # buat matriks perbandingan berpasangan
-    ahp_matrix: np.ndarray = np.ones((n_criteria, n_criteria))
+    ahp_criteria_matrix: np.ndarray = np.ones((n_criteria, n_criteria))
     for i in range(n_criteria):
         for j in range(i + 1, n_criteria):
             current_criterion = ahp_criteria[i]
@@ -178,12 +181,17 @@ def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
             key = f"comp_{current_criterion['name']}_vs_{target_criterion['name']}"
             selected_option = pairwise_comparisons[key]
             val = parse_ahp_value(selected_option)
-            ahp_matrix[i, j] = val
-            ahp_matrix[j, i] = 1.0 / val
+            ahp_criteria_matrix[i, j] = val
+            ahp_criteria_matrix[j, i] = 1.0 / val
     
-    return ahp_criteria, ahp_matrix
+    return ahp_criteria, ahp_criteria_matrix
 
-def configure_preferences(df: pd.DataFrame, ahp_criteria: List[Criterion]):
+def normalize_criteria(ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
+    normalized_weights = ahp_criteria_matrix / ahp_criteria_matrix.sum(axis=0)
+    criteria_weights = normalized_weights.mean(axis=1)
+    return criteria_weights
+
+def configure_preferences(df: pd.DataFrame, ahp_criteria: List[Criterion], ideal_crop_pref_df: pd.DataFrame) -> List[Criterion]:
     st.subheader("🔧 Konfigurasi Nilai Preferensi Ideal Setiap Kriteria")
     st.write(
         """
@@ -192,21 +200,20 @@ def configure_preferences(df: pd.DataFrame, ahp_criteria: List[Criterion]):
         """
     )
 
-    ideal_preferences = {
-        "N_SOIL": 65,
-        "P_SOIL": 45,
-        "K_SOIL": 35,
-        "TEMPERATURE": 25,
-        "HUMIDITY": 65,
-        "ph": 6.4,
-        "RAINFALL": 100,
-    }
+    crop_options = df["CROP"].unique().tolist()
+    selected_crop = st.selectbox(
+        label="Pilih Jenis Tanaman (CROP)",
+        options=crop_options
+    )
+    ideal_pref_for_selected_crop = ideal_crop_pref_df[ideal_crop_pref_df["CROP"] == selected_crop].iloc[0].to_dict()
+    st.write(selected_crop)
 
+    # value tidak terupdate secara otomatis ketika ganti crop, karena value disimpan di ahp_criteria yang hanya diupdate ketika configure_preferences dipanggil ulang (misal dengan tombol submit)
     for criterion in ahp_criteria:
         pref = st.number_input(
             key=f"pref_{criterion['name']}",
             label=f"{resolve_criteria_alias(criterion['name'], with_scale=True)}", 
-            value=ideal_preferences.get(
+            value=ideal_pref_for_selected_crop.get(
                 criterion['name'], 
                 df[criterion["name"]].max() 
                     if criterion["type"] == "Benefit" 
@@ -217,12 +224,54 @@ def configure_preferences(df: pd.DataFrame, ahp_criteria: List[Criterion]):
         
     return ahp_criteria
 
+def normalize_alternatives(df: pd.DataFrame, ahp_criteria: List[Criterion]) -> pd.DataFrame:
+    normalized_alternative = df.copy()
+    for crit in ahp_criteria:
+        col = crit["name"]
+        if crit["type"] == "Benefit":
+            normalized_alternative[col] = df[col] / df[col].max()
+        elif crit["type"] == "Cost":
+            normalized_alternative[col] = df[col].min() / df[col]
+        # elif crit["type"] == "Preference": # absolute value normalisasi
+        #     # contoh normalisasi untuk kriteria preferensi, bisa disesuaikan dengan kebutuhan
+        #     pref_value = crit.get("preference", df[crit["name"]].max())
+        #     normalized_alternative[col] = 1 - (abs(df[col] - pref_value) / (df[col].max() - df[col].min()))
+
+    return normalized_alternative
+
+def show_pairwise_comparison_matrix(ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
+    st.divider()
+    st.subheader("📊 Matriks Perbandingan Berpasangan Kriteria")
+    st.dataframe(
+        pd.DataFrame(
+            ahp_criteria_matrix, 
+            index=[c["alias"] for c in ahp_criteria], 
+            columns=[c["alias"] for c in ahp_criteria]
+        )
+    )
+
+def show_normalized_criteria_weights(ahp_criteria: List[Criterion], criteria_weights: np.ndarray):
+    st.divider()
+    st.subheader("📊 Bobot Kriteria Setelah Normalisasi")
+    st.dataframe(
+        pd.DataFrame({
+            "Bobot Kriteria": criteria_weights
+        }, index=[c["alias"] for c in ahp_criteria])
+    )
+
+def show_normalized_alternatives(normalized_alternative: pd.DataFrame):
+    st.divider()
+    st.subheader("📊 Nilai Alternatif Setelah Normalisasi")
+    st.dataframe(normalized_alternative.head())
+
 def show_results():
+    st.divider()
     st.subheader("📊 Pilihan Lahan Terbaik Untuk Anda")
     st.markdown("`Mungkin bisa ada filter CROP atau STATE`")
 
 def main():
     df = pd.read_csv("indiancrop_dataset.csv")
+
     project_name = "Sistem Pendukung Keputusan untuk Pemilihan Lahan dengan Metode AHP"
     st.set_page_config(
         page_title=project_name,
@@ -248,22 +297,18 @@ def main():
 
     load_sample_data(df)
 
-    st.divider()
-
     # ahp_criteria: sesuai class Criterion
-    # ahp_matrix: matriks perbandingan berpasangan skala saaty
+    # ahp_criteria_matrix: matriks perbandingan berpasangan skala saaty
     # dimana kriteria yang dibandingkan adalah semua kriteria non-Categorical (Benefit, Cost, Preference)
-    ahp_criteria, ahp_matrix = configure_criteria(df)
+    ahp_criteria, ahp_criteria_matrix = configure_criteria(df)
+    show_pairwise_comparison_matrix(ahp_criteria, ahp_criteria_matrix)
 
-    st.divider()
+    criteria_weights = normalize_criteria(ahp_criteria, ahp_criteria_matrix)
+    show_normalized_criteria_weights(ahp_criteria, criteria_weights)
 
-    ahp_criteria = configure_preferences(df, ahp_criteria)
-
-    # debug
-    # st.write(ahp_criteria)
-    # st.write(ahp_matrix)
-
-    st.divider()
+    # ahp_criteria = configure_preferences(df, ahp_criteria, ideal_crop_pref_df)
+    normalized_alternatives = normalize_alternatives(df, ahp_criteria)
+    show_normalized_alternatives(normalized_alternatives)
 
     show_results()
 
