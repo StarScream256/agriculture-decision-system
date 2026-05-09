@@ -119,8 +119,8 @@ def resolve_criteria_type(col):
         return "Categorical"
 
 def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
-    st.divider()
     st.subheader("⚙️ Konfigurasi Kriteria dan Bobot")
+    st.write("Tentukan bobot kepentingan untuk setiap kriteria dengan membandingkan secara berpasangan.")
 
     criteria: List[Criterion] = [{
         "name": col,
@@ -191,57 +191,34 @@ def normalize_criteria(ahp_criteria: List[Criterion], ahp_criteria_matrix: np.nd
     criteria_weights = normalized_weights.mean(axis=1)
     return criteria_weights
 
-def configure_preferences(df: pd.DataFrame, ahp_criteria: List[Criterion], ideal_crop_pref_df: pd.DataFrame) -> List[Criterion]:
-    st.subheader("🔧 Konfigurasi Nilai Preferensi Ideal Setiap Kriteria")
-    st.write(
-        """
-        Ubah nilai preferensi ideal di bawah ini sesuai dengan tujuan atau kebutuhan lahan yang akan Anda cari. 
-        Nilai ini akan digunakan dalam perhitungan AHP untuk menentukan alternatif terbaik di setiap kriteria.
-        """
-    )
+def weighted_product(ahp_criteria: List[Criterion], criteria_weights: np.ndarray, df: pd.DataFrame):
+    col_names = [c["name"] for c in ahp_criteria]
+    vector_s = df.copy()
+    vector_s[col_names] = vector_s[col_names].pow(criteria_weights)
+    vector_s["Total"] = vector_s[col_names].prod(axis=1)
 
-    crop_options = df["CROP"].unique().tolist()
-    selected_crop = st.selectbox(
-        label="Pilih Jenis Tanaman (CROP)",
-        options=crop_options
-    )
-    ideal_pref_for_selected_crop = ideal_crop_pref_df[ideal_crop_pref_df["CROP"] == selected_crop].iloc[0].to_dict()
-    st.write(selected_crop)
+    vector_v = vector_s["Total"] / vector_s["Total"].sum()
+    vector_v = pd.DataFrame({
+        "STATE": df["STATE"],
+        "CROP": df["CROP"],
+        "Vector V": vector_v
+    })
+    return vector_s, vector_v
 
-    # value tidak terupdate secara otomatis ketika ganti crop, karena value disimpan di ahp_criteria yang hanya diupdate ketika configure_preferences dipanggil ulang (misal dengan tombol submit)
-    for criterion in ahp_criteria:
-        pref = st.number_input(
-            key=f"pref_{criterion['name']}",
-            label=f"{resolve_criteria_alias(criterion['name'], with_scale=True)}", 
-            value=ideal_pref_for_selected_crop.get(
-                criterion['name'], 
-                df[criterion["name"]].max() 
-                    if criterion["type"] == "Benefit" 
-                    else df[criterion["name"]].min()
-            )
-        )
-        criterion["preference"] = pref
-        
-    return ahp_criteria
+def consistency_check(ahp_criteria_matrix: np.ndarray):
+    n = ahp_criteria_matrix.shape[0]
+    eigenvalues, _ = np.linalg.eig(ahp_criteria_matrix)
+    max_eigenvalue = np.max(np.real(eigenvalues))
+    ci = (max_eigenvalue - n) / (n - 1)
 
-def normalize_alternatives(df: pd.DataFrame, ahp_criteria: List[Criterion]) -> pd.DataFrame:
-    normalized_alternative = df.copy()
-    for crit in ahp_criteria:
-        col = crit["name"]
-        if crit["type"] == "Benefit":
-            normalized_alternative[col] = df[col] / df[col].max()
-        elif crit["type"] == "Cost":
-            normalized_alternative[col] = df[col].min() / df[col]
-        # elif crit["type"] == "Preference": # absolute value normalisasi
-        #     # contoh normalisasi untuk kriteria preferensi, bisa disesuaikan dengan kebutuhan
-        #     pref_value = crit.get("preference", df[crit["name"]].max())
-        #     normalized_alternative[col] = 1 - (abs(df[col] - pref_value) / (df[col].max() - df[col].min()))
+    ri_values = [0.00, 0.00, 0.58, 0.90, 1.12, 1.24, 1.32, 1.41, 1.45, 1.49]
+    ri = ri_values[n - 1] if n <= len(ri_values) else ri_values[-1]
 
-    return normalized_alternative
+    cr = ci / ri if ri != 0 else 0
+    return cr
 
 def show_pairwise_comparison_matrix(ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
-    st.divider()
-    st.subheader("📊 Matriks Perbandingan Berpasangan Kriteria")
+    # st.subheader("📊 Matriks Perbandingan Berpasangan Kriteria")
     st.dataframe(
         pd.DataFrame(
             ahp_criteria_matrix, 
@@ -250,19 +227,35 @@ def show_pairwise_comparison_matrix(ahp_criteria: List[Criterion], ahp_criteria_
         )
     )
 
-def show_normalized_criteria_weights(ahp_criteria: List[Criterion], criteria_weights: np.ndarray):
-    st.divider()
-    st.subheader("📊 Bobot Kriteria Setelah Normalisasi")
-    st.dataframe(
-        pd.DataFrame({
-            "Bobot Kriteria": criteria_weights
-        }, index=[c["alias"] for c in ahp_criteria])
-    )
+def show_normalized_criteria(ahp_criteria: List[Criterion], criteria_weights: np.ndarray):
+    # st.subheader("📊 Bobot Kriteria Setelah Normalisasi")
+    df = pd.DataFrame({
+        "Bobot Kriteria": criteria_weights
+    }, index=[c["alias"] for c in ahp_criteria])
+    df.loc["Total"] = df["Bobot Kriteria"].sum()
+    st.dataframe(df)
 
-def show_normalized_alternatives(normalized_alternative: pd.DataFrame):
-    st.divider()
-    st.subheader("📊 Nilai Alternatif Setelah Normalisasi")
-    st.dataframe(normalized_alternative.head())
+def show_weighted_product(ahp_criteria: List[Criterion], vector_s: pd.DataFrame, vector_v: pd.Series):
+    # st.subheader("📊 Nilai Alternatif Setelah Dikalikan dengan Bobot Kriteria")
+    tabs = st.tabs(["Vector S (Nilai Alternatif)", "Vector V (Nilai Normalisasi)"])
+    with tabs[0]:
+        st.dataframe(vector_s)
+    with tabs[1]:
+        st.dataframe(vector_v)
+
+def show_detailed_calculations(df: pd.DataFrame, ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
+    with st.expander("Detail Perhitungan"):
+        tabs = st.tabs(["Matriks Perbandingan Berpasangan", "Normalisasi Bobot Kriteria", "Ranking Alternatif"])
+        with tabs[0]:
+            show_pairwise_comparison_matrix(ahp_criteria, ahp_criteria_matrix)
+
+        with tabs[1]:
+            criteria_weights = normalize_criteria(ahp_criteria, ahp_criteria_matrix)
+            show_normalized_criteria(ahp_criteria, criteria_weights)
+
+        with tabs[2]:
+            vector_s, vector_v = weighted_product(ahp_criteria, criteria_weights, df)
+            show_weighted_product(ahp_criteria, vector_s, vector_v)
 
 def show_results():
     st.divider()
@@ -280,35 +273,30 @@ def main():
         initial_sidebar_state="expanded",
     )
     st.title(project_name)
-    st.write(
-        """
-        Sistem ini membantu menentukan prioritas pemilihan lahan pertanian 
-        yang paling optimal dengan mempertimbangkan berbagai kriteria 
-        (seperti kualitas tanah, ketersediaan air, dan aksesibilitas) 
-        menggunakan metode AHP.
-        """
-    )
+    st.write("Sistem ini membantu menentukan prioritas pemilihan lahan pertanian yang paling optimal dengan mempertimbangkan berbagai kriteria (seperti kualitas tanah, ketersediaan air, dan aksesibilitas) menggunakan metode AHP.")
 
     # get_contributor()
-
-    st.divider()
     
+    st.divider()
     ahp_overview()
-
     load_sample_data(df)
 
+    
     # ahp_criteria: sesuai class Criterion
     # ahp_criteria_matrix: matriks perbandingan berpasangan skala saaty
     # dimana kriteria yang dibandingkan adalah semua kriteria non-Categorical (Benefit, Cost, Preference)
+    st.divider()
     ahp_criteria, ahp_criteria_matrix = configure_criteria(df)
-    show_pairwise_comparison_matrix(ahp_criteria, ahp_criteria_matrix)
 
-    criteria_weights = normalize_criteria(ahp_criteria, ahp_criteria_matrix)
-    show_normalized_criteria_weights(ahp_criteria, criteria_weights)
-
-    # ahp_criteria = configure_preferences(df, ahp_criteria, ideal_crop_pref_df)
-    normalized_alternatives = normalize_alternatives(df, ahp_criteria)
-    show_normalized_alternatives(normalized_alternatives)
+    # consistency check
+    if st.button("Cek Konsistensi Perbandingan"):
+        cr = consistency_check(ahp_criteria_matrix)
+        if cr < 0.1:
+            st.success(f"Konsistensi baik (CR = {cr:.4f} < 0.1)")
+            show_detailed_calculations(df, ahp_criteria, ahp_criteria_matrix)
+        else:
+            st.error(f"Konsistensi buruk (CR = {cr:.4f} >= 0.1). Pertimbangkan untuk meninjau kembali perbandingan.")
+        
 
     show_results()
 
