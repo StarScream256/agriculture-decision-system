@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import requests
+import matplotlib.pyplot as plt
 from typing import TypedDict, List, Optional, Tuple, Union, Literal
 
 # type hint
@@ -11,41 +12,43 @@ class Criterion(TypedDict):
     type: Literal["Benefit", "Cost", "Preference", "Categorical"]
     preference: Optional[float]
 
-# jangan di uncomment saat development, kena rate limit github 60 req/jam nggak bisa dipake lagi
-# def get_contributor():
-#     contributor = []
-#     repo_url = "https://api.github.com/repos/StarScream256/agriculture-decision-system"
-#     repo_response = requests.get(repo_url)
-#     if repo_response.status_code == 200:
-#         repo_data = repo_response.json()
-#         contributor.append({
-#             "login": repo_data["owner"]["login"],
-#             "avatar_url": repo_data["owner"]["avatar_url"],
-#         })
+# jangan di uncomment saat development, kena rate limit github 60 req/jam nggak bisa dipake lagi, nunggu 1 jam buat reset
+def get_contributor():
+    contributor = []
+    repo_url = "https://api.github.com/repos/StarScream256/agriculture-decision-system"
+    repo_response = requests.get(repo_url)
+    if repo_response.status_code == 200:
+        repo_data = repo_response.json()
+        contributor.append({
+            "login": repo_data["owner"]["login"],
+            "avatar_url": repo_data["owner"]["avatar_url"],
+        })
     
-#     repo_html = f'<a href="{repo_url}" target="_blank"><img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" style="border-radius:50%; width:40px; height:40px; margin-right:10px;" title="Repo"></a>'
+    repo_html = f'<a href="{repo_url}" target="_blank"><img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" style="border-radius:50%; width:40px; height:40px; margin-right:10px;" title="Repo"></a>'
     
-#     contributors_url = repo_url + "/contributors"
-#     contributors_response = requests.get(contributors_url)
-#     if contributors_response.status_code == 200:
-#         contributors_data = contributors_response.json()
-#         if contributors_data:
-#             for contrib in contributors_data:
-#                 contributor.append({
-#                     "login": contrib["login"],
-#                     "avatar_url": contrib["avatar_url"],
-#                 })
+    contributors_url = repo_url + "/contributors"
+    contributors_response = requests.get(contributors_url)
+    if contributors_response.status_code == 200:
+        contributors_data = contributors_response.json()
+        if contributors_data:
+            for contrib in contributors_data:
+                contributor.append({
+                    "login": contrib["login"],
+                    "avatar_url": contrib["avatar_url"],
+                })
 
-#     img_html = "".join([
-#         f'<a href="https://github.com/{c["login"]}" target="_blank"><img src="{c["avatar_url"]}" style="border-radius:50%; width:40px; height:40px; margin-right:10px;" title="{c["login"]}"></a>'
-#         for c in contributor
-#     ])
-#     st.write(contributor)
+    unique_contributors = {c["login"]: c for c in contributor}
+    contributor = list(unique_contributors.values())
+    contrib_image_html = "".join([
+        f'<a href="https://github.com/{c["login"]}" target="_blank"><img src="{c["avatar_url"]}" style="border-radius:50%; width:40px; height:40px; margin-right:10px;" title="{c["login"]}"></a>'
+        for c in contributor
+    ])
+    # st.write(contributor)
 
-#     st.markdown(
-#         f'<div style="display: flex; flex-wrap: wrap;">{repo_html}{img_html}</div>', 
-#         unsafe_allow_html=True
-#     )
+    st.markdown(
+        f'<div style="display: flex; flex-wrap: wrap;">{repo_html}{contrib_image_html}</div>', 
+        unsafe_allow_html=True
+    )
 
 def ahp_overview():
     # st.subheader("🔍 Overview Analytic Hierarchy Process (AHP)")
@@ -109,9 +112,9 @@ def resolve_criteria_alias(col, with_scale=False):
     return alias_map.get(col, col)
 
 def resolve_criteria_type(col):
-    if col in ["CROP_PRICE"]:
+    if col in []:
         return "Cost"
-    elif col in ["N_SOIL", "P_SOIL", "K_SOIL", "TEMPERATURE", "HUMIDITY", "ph", "RAINFALL"]:
+    elif col in ["N_SOIL", "P_SOIL", "K_SOIL", "TEMPERATURE", "HUMIDITY", "ph", "RAINFALL", "CROP_PRICE"]:
         return "Benefit"
     # elif col in ["N_SOIL", "P_SOIL", "K_SOIL", "TEMPERATURE", "HUMIDITY", "ph", "RAINFALL"]:
     #     return "Preference"
@@ -149,23 +152,23 @@ def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
                     options=[
                         "1 - Sama penting",
 
-                        "1/2 - Antara",
+                        f"1/2 - Antara sama penting dan sedikit lebih penting {target_criterion['alias']}",
                         f"1/3 - Sedikit lebih penting {target_criterion['alias']}",
-                        "1/4 - Antara",
+                        f"1/4 - Antara sedikit lebih penting dan lebih penting {target_criterion['alias']}",
                         f"1/5 - Lebih penting {target_criterion['alias']}",
-                        "1/6 - Antara",
+                        f"1/6 - Antara lebih penting dan sangat lebih penting {target_criterion['alias']}",
                         f"1/7 - Sangat lebih penting {target_criterion['alias']}",
-                        "1/8 - Antara",
+                        f"1/8 - Antara sangat lebih penting dan mutlak lebih penting {target_criterion['alias']}",
                         f"1/9 - Mutlak lebih penting {target_criterion['alias']}",
 
 
-                        "2 - Antara",
+                        f"2 - Antara sama penting dan sedikit lebih penting {current_criterion['alias']}",
                         f"3 - Sedikit lebih penting {current_criterion['alias']}",
-                        "4 - Antara",
+                        f"4 - Antara sedikit lebih penting dan lebih penting {current_criterion['alias']}",
                         f"5 - Lebih penting {current_criterion['alias']}",
-                        "6 - Antara",
+                        f"6 - Antara lebih penting dan sangat lebih penting {current_criterion['alias']}",
                         f"7 - Sangat lebih penting {current_criterion['alias']}",
-                        "8 - Antara",
+                        f"8 - Antara sangat lebih penting dan mutlak lebih penting {current_criterion['alias']}",
                         f"9 - Mutlak lebih penting {current_criterion['alias']}"
                     ],
                 )
@@ -198,11 +201,9 @@ def weighted_product(ahp_criteria: List[Criterion], criteria_weights: np.ndarray
     vector_s["Total"] = vector_s[col_names].prod(axis=1)
 
     vector_v = vector_s["Total"] / vector_s["Total"].sum()
-    vector_v = pd.DataFrame({
-        "STATE": df["STATE"],
-        "CROP": df["CROP"],
-        "Vector V": vector_v
-    })
+    df_vector_v = df.copy()
+    df_vector_v["Vector V"] = vector_v
+    vector_v = df_vector_v
     return vector_s, vector_v
 
 def consistency_check(ahp_criteria_matrix: np.ndarray):
@@ -231,16 +232,18 @@ def show_normalized_criteria(ahp_criteria: List[Criterion], criteria_weights: np
     # st.subheader("📊 Bobot Kriteria Setelah Normalisasi")
     df = pd.DataFrame({
         "Bobot Kriteria": criteria_weights
-    }, index=[c["alias"] for c in ahp_criteria])
+    }, index=[f"{c["name"]} - {c["alias"]}" for c in ahp_criteria])
     df.loc["Total"] = df["Bobot Kriteria"].sum()
     st.dataframe(df)
 
-def show_weighted_product(ahp_criteria: List[Criterion], vector_s: pd.DataFrame, vector_v: pd.Series):
+def show_weighted_product(df: pd.DataFrame, vector_s: pd.DataFrame, vector_v: pd.Series):
     # st.subheader("📊 Nilai Alternatif Setelah Dikalikan dengan Bobot Kriteria")
-    tabs = st.tabs(["Vector S (Nilai Alternatif)", "Vector V (Nilai Normalisasi)"])
+    tabs = st.tabs(["Data Asli", "Vector S (Nilai Alternatif)", "Vector V (Nilai Normalisasi)"])
     with tabs[0]:
-        st.dataframe(vector_s)
+        st.dataframe(df)
     with tabs[1]:
+        st.dataframe(vector_s)
+    with tabs[2]:
         st.dataframe(vector_v)
 
 def show_detailed_calculations(df: pd.DataFrame, ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
@@ -255,15 +258,52 @@ def show_detailed_calculations(df: pd.DataFrame, ahp_criteria: List[Criterion], 
 
         with tabs[2]:
             vector_s, vector_v = weighted_product(ahp_criteria, criteria_weights, df)
-            show_weighted_product(ahp_criteria, vector_s, vector_v)
+            show_weighted_product(df, vector_s, vector_v)
 
-def show_results():
+def show_results(df: pd.DataFrame, vector_s: pd.DataFrame, vector_v: pd.DataFrame):
     st.divider()
     st.subheader("📊 Pilihan Lahan Terbaik Untuk Anda")
-    st.markdown("`Mungkin bisa ada filter CROP atau STATE`")
+    st.write("Berdasarkan perhitungan AHP, berikut adalah rekomendasi lahan pertanian yang paling optimal untuk dipilih. Anda dapat menyaring berdasarkan provinsi atau jenis tanaman untuk melihat rekomendasi yang lebih spesifik.")
+    cols = st.columns(3)
+    with cols[0]:
+        selected_state = st.selectbox(
+            label="Pilih Provinsi",
+            options=np.concatenate([["Semua Provinsi"], df["STATE"].unique()])
+        )
+    
+    with cols[1]:
+        selected_crop = st.selectbox(
+            label="Pilih Jenis Tanaman",
+            options=np.concatenate([["Semua Jenis Tanaman"], df["CROP"].unique()])
+        )
+
+    result_df = vector_v.copy()
+    if selected_state != "Semua Provinsi":
+        result_df = result_df[result_df["STATE"] == selected_state]
+    if selected_crop != "Semua Jenis Tanaman":
+        result_df = result_df[result_df["CROP"] == selected_crop]
+
+    result_df = result_df.sort_values("Vector V", ascending=False)
+
+    with cols[2]:
+        show_count = st.number_input(
+            label="Jumlah Hasil Tertampil",
+            min_value=1,
+            max_value=max(1,len(result_df)),
+            value=min(10, max(1, len(result_df))),
+            step=1
+        )
+
+    st.write(f"Ditemukan {len(result_df)} alternatif yang sesuai dengan filter Anda.")
+    st.success(f"👍Pilihan terbaik bagi anda adalah lahan nomor **{result_df.index[0]}** di **{result_df.iloc[0]['STATE']}** yang cocok untuk menanam **{result_df.iloc[0]['CROP']}** dengan skor {result_df.iloc[0]['Vector V']:.4f}.")
+
+    st.dataframe(
+        result_df.head(show_count)
+    )
 
 def main():
     df = pd.read_csv("indiancrop_dataset.csv")
+    df.index = "FARM_" + df.index.astype(str)
 
     project_name = "Sistem Pendukung Keputusan untuk Pemilihan Lahan dengan Metode AHP"
     st.set_page_config(
@@ -275,7 +315,7 @@ def main():
     st.title(project_name)
     st.write("Sistem ini membantu menentukan prioritas pemilihan lahan pertanian yang paling optimal dengan mempertimbangkan berbagai kriteria (seperti kualitas tanah, ketersediaan air, dan aksesibilitas) menggunakan metode AHP.")
 
-    # get_contributor()
+    get_contributor()
     
     st.divider()
     ahp_overview()
@@ -287,18 +327,37 @@ def main():
     # dimana kriteria yang dibandingkan adalah semua kriteria non-Categorical (Benefit, Cost, Preference)
     st.divider()
     ahp_criteria, ahp_criteria_matrix = configure_criteria(df)
-
+    
     # consistency check
-    if st.button("Cek Konsistensi Perbandingan"):
+    if st.button("👁️ Cek Konsistensi Perbandingan"):
         cr = consistency_check(ahp_criteria_matrix)
         if cr < 0.1:
-            st.success(f"Konsistensi baik (CR = {cr:.4f} < 0.1)")
+            st.success(f"👌Konsistensi baik (CR = {cr:.4f} < 0.1)")
+            vector_s, vector_v = weighted_product(
+                ahp_criteria, 
+                normalize_criteria(
+                    ahp_criteria, 
+                    ahp_criteria_matrix
+                ), df)
+
+            cols = st.columns([1, 4, 1])
+            with cols[1]:
+                figure, axis = plt.subplots(figsize=(4,4))
+                axis.pie(
+                    normalize_criteria(ahp_criteria, ahp_criteria_matrix), 
+                    labels=[c["alias"] for c in ahp_criteria], 
+                    autopct='%1.1f%%',
+                    textprops={ 'fontsize': 8 }
+                )
+                axis.axis('equal')
+                st.pyplot(figure)
+
+            show_results(df, vector_s, vector_v)
             show_detailed_calculations(df, ahp_criteria, ahp_criteria_matrix)
         else:
-            st.error(f"Konsistensi buruk (CR = {cr:.4f} >= 0.1). Pertimbangkan untuk meninjau kembali perbandingan.")
+            st.error(f"👎Konsistensi buruk (CR = {cr:.4f} >= 0.1). Pertimbangkan untuk meninjau kembali perbandingan.")
         
-
-    show_results()
+    
 
 if __name__ == "__main__":
 	main()
