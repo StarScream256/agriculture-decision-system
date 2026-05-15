@@ -12,7 +12,6 @@ class Criterion(TypedDict):
     type: Literal["Benefit", "Cost", "Preference", "Categorical"]
     preference: Optional[float]
 
-# jangan di uncomment saat development, kena rate limit github 60 req/jam nggak bisa dipake lagi, nunggu 1 jam buat reset
 def get_contributor():
     contributor = []
     repo_url = "https://api.github.com/repos/StarScream256/agriculture-decision-system"
@@ -49,6 +48,10 @@ def get_contributor():
         f'<div style="display: flex; flex-wrap: wrap;">{repo_html}{contrib_image_html}</div>', 
         unsafe_allow_html=True
     )
+
+def reset_session_state():
+    st.session_state.is_consistent = False
+    st.session_state.is_calculated = False
 
 def ahp_overview():
     # st.subheader("🔍 Overview Analytic Hierarchy Process (AHP)")
@@ -149,6 +152,7 @@ def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
                 selected_value = st.selectbox(
                     key=key,
                     label=f"{target_criterion['alias']}",
+                    on_change=reset_session_state,
                     options=[
                         "1 - Sama penting",
 
@@ -189,78 +193,27 @@ def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
     
     return ahp_criteria, ahp_criteria_matrix
 
-def normalize_criteria(ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
-    normalized_weights = ahp_criteria_matrix / ahp_criteria_matrix.sum(axis=0)
-    criteria_weights = normalized_weights.mean(axis=1)
-    return criteria_weights
+def transform(alternative: pd.Series) -> np.ndarray:
+    # menghindari division by zero karena ada nilai 0
+    clean_alt = [x if x != 0 else 0.01 for x in alternative]
+    return np.array([[i/j for j in clean_alt] for i in clean_alt])
 
-def weighted_product(ahp_criteria: List[Criterion], criteria_weights: np.ndarray, df: pd.DataFrame):
-    col_names = [c["name"] for c in ahp_criteria]
-    vector_s = df.copy()
-    vector_s[col_names] = vector_s[col_names].pow(criteria_weights)
-    vector_s["Total"] = vector_s[col_names].prod(axis=1)
+def normalize_and_get_weight(matrix: np.ndarray):
+    normalized = matrix / matrix.sum(axis=0)
+    weight = normalized.mean(axis=1)
+    return weight
 
-    vector_v = vector_s["Total"] / vector_s["Total"].sum()
-    df_vector_v = df.copy()
-    df_vector_v["Vector V"] = vector_v
-    vector_v = df_vector_v
-    return vector_s, vector_v
-
-def consistency_check(ahp_criteria_matrix: np.ndarray):
-    n = ahp_criteria_matrix.shape[0]
-    eigenvalues, _ = np.linalg.eig(ahp_criteria_matrix)
-    max_eigenvalue = np.max(np.real(eigenvalues))
-    ci = (max_eigenvalue - n) / (n - 1)
-
+def consistency_check(matrix: np.ndarray, weight: np.ndarray):
+    n = len(matrix)
     ri_values = [0.00, 0.00, 0.58, 0.90, 1.12, 1.24, 1.32, 1.41, 1.45, 1.49]
-    ri = ri_values[n - 1] if n <= len(ri_values) else ri_values[-1]
 
-    cr = ci / ri if ri != 0 else 0
+    cv = np.dot(matrix, weight) / weight
+    eigenvalue = cv.mean()
+    ci = (eigenvalue - n) / (n - 1)
+    cr = ci / ri_values[n - 1] if n - 1 < len(ri_values) else float('inf')
     return cr
 
-def show_pairwise_comparison_matrix(ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
-    # st.subheader("📊 Matriks Perbandingan Berpasangan Kriteria")
-    st.dataframe(
-        pd.DataFrame(
-            ahp_criteria_matrix, 
-            index=[c["alias"] for c in ahp_criteria], 
-            columns=[c["alias"] for c in ahp_criteria]
-        )
-    )
-
-def show_normalized_criteria(ahp_criteria: List[Criterion], criteria_weights: np.ndarray):
-    # st.subheader("📊 Bobot Kriteria Setelah Normalisasi")
-    df = pd.DataFrame({
-        "Bobot Kriteria": criteria_weights
-    }, index=[f"{c["name"]} - {c["alias"]}" for c in ahp_criteria])
-    df.loc["Total"] = df["Bobot Kriteria"].sum()
-    st.dataframe(df)
-
-def show_weighted_product(df: pd.DataFrame, vector_s: pd.DataFrame, vector_v: pd.Series):
-    # st.subheader("📊 Nilai Alternatif Setelah Dikalikan dengan Bobot Kriteria")
-    tabs = st.tabs(["Data Asli", "Vector S (Nilai Alternatif)", "Vector V (Nilai Normalisasi)"])
-    with tabs[0]:
-        st.dataframe(df)
-    with tabs[1]:
-        st.dataframe(vector_s)
-    with tabs[2]:
-        st.dataframe(vector_v)
-
-def show_detailed_calculations(df: pd.DataFrame, ahp_criteria: List[Criterion], ahp_criteria_matrix: np.ndarray):
-    with st.expander("Detail Perhitungan"):
-        tabs = st.tabs(["Matriks Perbandingan Berpasangan", "Normalisasi Bobot Kriteria", "Ranking Alternatif"])
-        with tabs[0]:
-            show_pairwise_comparison_matrix(ahp_criteria, ahp_criteria_matrix)
-
-        with tabs[1]:
-            criteria_weights = normalize_criteria(ahp_criteria, ahp_criteria_matrix)
-            show_normalized_criteria(ahp_criteria, criteria_weights)
-
-        with tabs[2]:
-            vector_s, vector_v = weighted_product(ahp_criteria, criteria_weights, df)
-            show_weighted_product(df, vector_s, vector_v)
-
-def show_results(df: pd.DataFrame, vector_s: pd.DataFrame, vector_v: pd.DataFrame):
+def filter_results(df: pd.DataFrame):
     st.divider()
     st.subheader("📊 Pilihan Lahan Terbaik Untuk Anda")
     st.write("Berdasarkan perhitungan AHP, berikut adalah rekomendasi lahan pertanian yang paling optimal untuk dipilih. Anda dapat menyaring berdasarkan provinsi atau jenis tanaman untuk melihat rekomendasi yang lebih spesifik.")
@@ -277,29 +230,22 @@ def show_results(df: pd.DataFrame, vector_s: pd.DataFrame, vector_v: pd.DataFram
             options=np.concatenate([["Semua Jenis Tanaman"], df["CROP"].unique()])
         )
 
-    result_df = vector_v.copy()
+    filtered_df = df.copy()
     if selected_state != "Semua Provinsi":
-        result_df = result_df[result_df["STATE"] == selected_state]
+        filtered_df = filtered_df[filtered_df["STATE"] == selected_state]
     if selected_crop != "Semua Jenis Tanaman":
-        result_df = result_df[result_df["CROP"] == selected_crop]
-
-    result_df = result_df.sort_values("Vector V", ascending=False)
+        filtered_df = filtered_df[filtered_df["CROP"] == selected_crop]
 
     with cols[2]:
         show_count = st.number_input(
             label="Jumlah Hasil Tertampil",
             min_value=1,
-            max_value=max(1,len(result_df)),
-            value=min(10, max(1, len(result_df))),
+            max_value=max(1,len(filtered_df)),
+            value=min(10, max(1, len(filtered_df))),
             step=1
         )
-
-    st.write(f"Ditemukan {len(result_df)} alternatif yang sesuai dengan filter Anda.")
-    st.success(f"👍Pilihan terbaik bagi anda adalah lahan nomor **{result_df.index[0]}** di **{result_df.iloc[0]['STATE']}** yang cocok untuk menanam **{result_df.iloc[0]['CROP']}** dengan skor {result_df.iloc[0]['Vector V']:.4f}.")
-
-    st.dataframe(
-        result_df.head(show_count)
-    )
+    
+    return filtered_df, show_count
 
 def main():
     df = pd.read_csv("indiancrop_dataset.csv")
@@ -321,43 +267,108 @@ def main():
     ahp_overview()
     load_sample_data(df)
 
-    
     # ahp_criteria: sesuai class Criterion
     # ahp_criteria_matrix: matriks perbandingan berpasangan skala saaty
     # dimana kriteria yang dibandingkan adalah semua kriteria non-Categorical (Benefit, Cost, Preference)
     st.divider()
     ahp_criteria, ahp_criteria_matrix = configure_criteria(df)
+    criteria_weight = normalize_and_get_weight(ahp_criteria_matrix)
     
+    # simpan state ke session
+    if "is_consistent" not in st.session_state:
+        st.session_state.is_consistent = False
+    if "is_calculated" not in st.session_state:
+        st.session_state.is_calculated = False
+
     # consistency check
     if st.button("👁️ Cek Konsistensi Perbandingan"):
-        cr = consistency_check(ahp_criteria_matrix)
+        cr = consistency_check(ahp_criteria_matrix,criteria_weight)
         if cr < 0.1:
             st.success(f"👌Konsistensi baik (CR = {cr:.4f} < 0.1)")
-            vector_s, vector_v = weighted_product(
-                ahp_criteria, 
-                normalize_criteria(
-                    ahp_criteria, 
-                    ahp_criteria_matrix
-                ), df)
-
-            cols = st.columns([1, 4, 1])
-            with cols[1]:
-                figure, axis = plt.subplots(figsize=(4,4))
-                axis.pie(
-                    normalize_criteria(ahp_criteria, ahp_criteria_matrix), 
-                    labels=[c["alias"] for c in ahp_criteria], 
-                    autopct='%1.1f%%',
-                    textprops={ 'fontsize': 8 }
-                )
-                axis.axis('equal')
-                st.pyplot(figure)
-
-            show_results(df, vector_s, vector_v)
-            show_detailed_calculations(df, ahp_criteria, ahp_criteria_matrix)
+            st.session_state.is_consistent = not st.session_state.is_consistent
         else:
             st.error(f"👎Konsistensi buruk (CR = {cr:.4f} >= 0.1). Pertimbangkan untuk meninjau kembali perbandingan.")
         
+    # pemicu tampil hasil
+    if st.session_state.is_consistent:
+        # visualisasi bobot kriteria
+        cols = st.columns([1, 4, 1])
+        with cols[1]:
+            fig, ax = plt.subplots()
+            ax.pie(
+                criteria_weight, 
+                labels=[f"{c['alias']}" for c in ahp_criteria], 
+                autopct='%1.1f%%'
+            )
+            ax.axis('equal')
+            st.pyplot(fig)
+
+        if st.button("🎯Hitung dan Tampilkan Hasil Rekomendasi"):
+            st.session_state.is_calculated = True
     
+    # tampil hasil
+    if st.session_state.is_consistent and st.session_state.is_calculated:
+        filtered_df, show_count = filter_results(df)
+        if len(filtered_df) > 0:
+            transformed_n_soil = transform(filtered_df["N_SOIL"])
+            transformed_p_soil = transform(filtered_df["P_SOIL"])
+            transformed_k_soil = transform(filtered_df["K_SOIL"])
+            transformed_temperature = transform(filtered_df["TEMPERATURE"])
+            transformed_humidity = transform(filtered_df["HUMIDITY"])
+            transformed_ph = transform(filtered_df["ph"])
+            transformed_rainfall = transform(filtered_df["RAINFALL"])
+            transformed_crop_price = transform(filtered_df["CROP_PRICE"])
+
+            n_soil_weight = normalize_and_get_weight(transformed_n_soil)
+            p_soil_weight = normalize_and_get_weight(transformed_p_soil)
+            k_soil_weight = normalize_and_get_weight(transformed_k_soil)
+            temperature_weight = normalize_and_get_weight(transformed_temperature)
+            humidity_weight = normalize_and_get_weight(transformed_humidity)
+            ph_weight = normalize_and_get_weight(transformed_ph)
+            rainfall_weight = normalize_and_get_weight(transformed_rainfall)
+            crop_price_weight = normalize_and_get_weight(transformed_crop_price)
+
+            total_weight = np.array([n_soil_weight, p_soil_weight, k_soil_weight, temperature_weight, humidity_weight, ph_weight, rainfall_weight, crop_price_weight])
+            final_scores = np.dot(total_weight.T, criteria_weight)
+
+            result_df = pd.DataFrame({
+                "STATE": filtered_df["STATE"],
+                "CROP": filtered_df["CROP"],
+                "Score": final_scores
+            }, index=filtered_df.index).sort_values(by="Score", ascending=False)
+
+            if len(result_df) > 0:
+                st.write(f"Ditemukan {len(result_df)} alternatif yang sesuai dengan filter Anda.")
+                st.success(f"👍Pilihan terbaik bagi anda adalah lahan nomor **{result_df.index[0]}** di **{result_df.iloc[0]['STATE']}** yang cocok untuk menanam **{result_df.iloc[0]['CROP']}** dengan skor {result_df.iloc[0]['Score']:.4f}.")
+            else:
+                st.warning("⚠️Tidak ditemukan alternatif yang sesuai dengan filter Anda. Silakan ubah pilihan filter untuk melihat hasil lainnya.")
+
+            st.dataframe(result_df.head(show_count))
+
+            # detail perhitungan
+            st.subheader("🔎 Detail Perhitungan")
+            st.write("Berikut adalah detail untuk setiap perhitungan yang dilakukan")
+            with st.expander("Matriks Perbandingan Berpasangan Kriteria"):
+                df = pd.DataFrame({
+                    "Bobot Kriteria": criteria_weight
+                }, index=[f"{c["name"]} - {c["alias"]}" for c in ahp_criteria])
+                df.loc["Total"] = df["Bobot Kriteria"].sum()
+                st.dataframe(df)
+            with st.expander("Bobot Kriteria"):
+                st.dataframe(pd.DataFrame(ahp_criteria_matrix, index=[c["alias"] for c in ahp_criteria], columns=[c["alias"] for c in ahp_criteria]))
+            for i, c in enumerate(ahp_criteria):
+                with st.expander(f"Bobot Alternatif untuk Kriteria **{c['alias']}**"):
+                    st.dataframe(pd.DataFrame(total_weight[i, :], index=filtered_df.index, columns=[f"Bobot {c['alias']}"]))
+            with st.expander("Matriks Rekap Bobot Alternatif"):
+                st.dataframe(pd.DataFrame(total_weight.T, index=filtered_df.index, columns=[f"Bobot {c['alias']}" for c in ahp_criteria]))
+            with st.expander("Skor Akhir Setiap Alternatif"):
+                st.dataframe(pd.DataFrame(final_scores, index=filtered_df.index, columns=["Skor Akhir"]))
+
+        else:
+            st.warning("⚠️Tidak ditemukan alternatif yang sesuai dengan filter Anda. Silakan ubah pilihan filter untuk melihat hasil lainnya.")
+
+
+
 
 if __name__ == "__main__":
 	main()
