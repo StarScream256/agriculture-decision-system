@@ -349,13 +349,13 @@ def main():
             st.subheader("🔎 Detail Perhitungan")
             st.write("Berikut adalah detail untuk setiap perhitungan yang dilakukan")
             with st.expander("Matriks Perbandingan Berpasangan Kriteria"):
+                st.dataframe(pd.DataFrame(ahp_criteria_matrix, index=[c["alias"] for c in ahp_criteria], columns=[c["alias"] for c in ahp_criteria]))
+            with st.expander("Bobot Kriteria"):
                 df = pd.DataFrame({
                     "Bobot Kriteria": criteria_weight
                 }, index=[f"{c["name"]} - {c["alias"]}" for c in ahp_criteria])
                 df.loc["Total"] = df["Bobot Kriteria"].sum()
                 st.dataframe(df)
-            with st.expander("Bobot Kriteria"):
-                st.dataframe(pd.DataFrame(ahp_criteria_matrix, index=[c["alias"] for c in ahp_criteria], columns=[c["alias"] for c in ahp_criteria]))
             for i, c in enumerate(ahp_criteria):
                 with st.expander(f"Bobot Alternatif untuk Kriteria **{c['alias']}**"):
                     st.dataframe(pd.DataFrame(total_weight[i, :], index=filtered_df.index, columns=[f"Bobot {c['alias']}"]))
