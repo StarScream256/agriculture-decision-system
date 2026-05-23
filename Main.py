@@ -207,11 +207,22 @@ def consistency_check(matrix: np.ndarray, weight: np.ndarray):
     n = len(matrix)
     ri_values = [0.00, 0.00, 0.58, 0.90, 1.12, 1.24, 1.32, 1.41, 1.45, 1.49]
 
+    # lambda max
     cv = np.dot(matrix, weight) / weight
     eigenvalue = cv.mean()
+    
     ci = (eigenvalue - n) / (n - 1)
-    cr = ci / ri_values[n - 1] if n - 1 < len(ri_values) else float('inf')
-    return cr
+    if abs(ci) < 1e-10: 
+        ci = 0.0
+
+    if n <= len(ri_values):
+        ri = ri_values[n - 1]
+    else:
+        # approksimasi Alonso & Lamata untuk matriks > 10
+        ri = (1.45 * (n - 1)) / n
+    cr = ci / ri if ri > 0 else 0.0
+
+    return ci, cr
 
 def filter_results(df: pd.DataFrame):
     st.divider()
@@ -280,9 +291,9 @@ def main():
     if "is_calculated" not in st.session_state:
         st.session_state.is_calculated = False
 
-    # consistency check
+    # consistency check kriteria
     if st.button("👁️ Cek Konsistensi Perbandingan"):
-        cr = consistency_check(ahp_criteria_matrix,criteria_weight)
+        ci, cr = consistency_check(ahp_criteria_matrix,criteria_weight)
         if cr < 0.1:
             st.success(f"👌Konsistensi baik (CR = {cr:.4f} < 0.1)")
             st.session_state.is_consistent = not st.session_state.is_consistent
@@ -356,8 +367,11 @@ def main():
                 }, index=[f"{c["name"]} - {c["alias"]}" for c in ahp_criteria])
                 df.loc["Total"] = df["Bobot Kriteria"].sum()
                 st.dataframe(df)
+            # bobot alternatif untuk setiap kriteria
             for i, c in enumerate(ahp_criteria):
                 with st.expander(f"Bobot Alternatif untuk Kriteria **{c['alias']}**"):
+                    ci, cr = consistency_check(transform(filtered_df[c["name"]]), normalize_and_get_weight(transform(filtered_df[c["name"]])))
+                    st.write(f"Consistency index = {ci:.4f}, Consistency ratio = {cr:.4f}")
                     st.dataframe(pd.DataFrame(total_weight[i, :], index=filtered_df.index, columns=[f"Bobot {c['alias']}"]))
             with st.expander("Matriks Rekap Bobot Alternatif"):
                 st.dataframe(pd.DataFrame(total_weight.T, index=filtered_df.index, columns=[f"Bobot {c['alias']}" for c in ahp_criteria]))
