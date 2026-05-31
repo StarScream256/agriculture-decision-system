@@ -12,6 +12,7 @@ class Criterion(TypedDict):
     type: Literal["Benefit", "Cost", "Preference", "Categorical"]
     preference: Optional[float]
 
+
 def get_contributor():
     contributor = []
     repo_url = "https://api.github.com/repos/StarScream256/agriculture-decision-system"
@@ -24,7 +25,7 @@ def get_contributor():
         })
     
     repo_html = f'<a href="{repo_url}" target="_blank"><img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" style="border-radius:50%; width:40px; height:40px; margin-right:10px;" title="Repo"></a>'
-    
+    st.navigation()
     contributors_url = repo_url + "/contributors"
     contributors_response = requests.get(contributors_url)
     if contributors_response.status_code == 200:
@@ -49,9 +50,11 @@ def get_contributor():
         unsafe_allow_html=True
     )
 
+
 def reset_session_state():
     st.session_state.is_consistent = False
     st.session_state.is_calculated = False
+
 
 def ahp_overview():
     # st.subheader("🔍 Overview Analytic Hierarchy Process (AHP)")
@@ -72,9 +75,11 @@ def ahp_overview():
             """
         )
 
+
 def load_sample_data(df: pd.DataFrame, amount=10):
     with st.expander("Contoh Data Lahan Pertanian"):
         st.dataframe(df.head(amount))
+
 
 def parse_ahp_value(selected_option: str):
     number_str = selected_option.split(" - ")[0]
@@ -84,6 +89,7 @@ def parse_ahp_value(selected_option: str):
         return float(parts[0]) / float(parts[1])
     else:
         return float(number_str)
+
 
 def resolve_criteria_alias(col, with_scale=False):
     criteria_alias = {
@@ -114,6 +120,7 @@ def resolve_criteria_alias(col, with_scale=False):
     alias_map = scaled_criteria_alias if with_scale else criteria_alias
     return alias_map.get(col, col)
 
+
 def resolve_criteria_type(col):
     if col in []:
         return "Cost"
@@ -123,6 +130,7 @@ def resolve_criteria_type(col):
     #     return "Preference"
     elif col in ["STATE", "CROP"]:
         return "Categorical"
+
 
 def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
     st.subheader("⚙️ Konfigurasi Kriteria dan Bobot")
@@ -193,15 +201,18 @@ def configure_criteria(df: pd.DataFrame) -> Tuple[List[Criterion], np.ndarray]:
     
     return ahp_criteria, ahp_criteria_matrix
 
+
 def transform(alternative: pd.Series) -> np.ndarray:
     # menghindari division by zero karena ada nilai 0
     clean_alt = [x if x != 0 else 0.01 for x in alternative]
     return np.array([[i/j for j in clean_alt] for i in clean_alt])
 
+
 def normalize_and_get_weight(matrix: np.ndarray):
     normalized = matrix / matrix.sum(axis=0)
     weight = normalized.mean(axis=1)
     return weight
+
 
 def consistency_check(matrix: np.ndarray, weight: np.ndarray):
     n = len(matrix)
@@ -223,6 +234,7 @@ def consistency_check(matrix: np.ndarray, weight: np.ndarray):
     cr = ci / ri if ri > 0 else 0.0
 
     return ci, cr
+
 
 def filter_results(df: pd.DataFrame):
     st.divider()
@@ -258,21 +270,21 @@ def filter_results(df: pd.DataFrame):
     
     return filtered_df, show_count
 
+
 def main():
-    df = pd.read_csv("indiancrop_dataset.csv")
+    df = pd.read_csv("data/indiancrop_dataset.csv")
     df.index = "FARM_" + df.index.astype(str)
 
     project_name = "Sistem Pendukung Keputusan untuk Pemilihan Lahan dengan Metode AHP"
     st.set_page_config(
         page_title=project_name,
-        # page_icon="",
         layout="wide",
         initial_sidebar_state="expanded",
     )
     st.title(project_name)
     st.write("Sistem ini membantu menentukan prioritas pemilihan lahan pertanian yang paling optimal dengan mempertimbangkan berbagai kriteria (seperti kualitas tanah, ketersediaan air, dan aksesibilitas) menggunakan metode AHP.")
 
-    get_contributor()
+    # get_contributor()
     
     st.divider()
     ahp_overview()
@@ -380,8 +392,6 @@ def main():
 
         else:
             st.warning("⚠️Tidak ditemukan alternatif yang sesuai dengan filter Anda. Silakan ubah pilihan filter untuk melihat hasil lainnya.")
-
-
 
 
 if __name__ == "__main__":
