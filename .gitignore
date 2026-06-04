@@ -2,3 +2,4 @@ cspell.json
 .cspell
 .venv
 .vscode
+__pycache__
